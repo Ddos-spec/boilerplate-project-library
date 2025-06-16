@@ -1,89 +1,64 @@
 'use strict';
-
-const express     = require('express');
-const bodyParser  = require('body-parser');
-const cors        = require('cors');
+const express    = require('express');
+const bodyParser = require('body-parser');
+const cors       = require('cors');
 require('dotenv').config();
-
-const apiRoutes         = require('./routes/api.js');
-const fccTestingRoutes  = require('./routes/fcctesting.js');
-const runner            = require('./test-runner');
-const { MongoClient }   = require('mongodb');
+const apiRoutes  = require('./routes/api.js');
+const fccTestingRoutes = require('./routes/fcctesting.js');
+const runner     = require('./test-runner');
+const { MongoClient } = require('mongodb');
 
 const app = express();
 
+// Middleware dasar
 app.use('/public', express.static(process.cwd() + '/public'));
-
-app.use(cors({origin: '*'})); //For FCC testing purposes only
-
+app.use(cors({ origin: '*' }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// --- KONEKSI DATABASE & SERVER STARTUP ---
+// Front-end route & testing
+app.route('/').get((req, res) => {
+  res.sendFile(process.cwd() + '/views/index.html');
+});
+fccTestingRoutes(app);
 
-// Buat instance MongoClient baru. Gunakan process.env.DB sesuai instruksi.
-const client = new MongoClient(process.env.DB);
+// DB connection
+const client = new MongoClient(process.env.MONGO_URI);
+const db = client.db('personal-library');
 
-// Fungsi utama untuk konek ke DB dan menjalankan server
-async function startServer() {
-  try {
-    // Konek ke client MongoDB
-    await client.connect();
-    console.log("Successfully connected to database");
-    
-    // Pilih database (misal: 'personal-library')
-    const db = client.db('personal-library'); 
-    
-    // Index page (static HTML)
-    app.route('/')
-      .get(function (req, res) {
-        res.sendFile(process.cwd() + '/views/index.html');
-      });
+// 🚀 Mount route API SEBELUM konek ke DB
+apiRoutes(app, db);
 
-    //For FCC testing purposes
-    fccTestingRoutes(app);
+// 404 handler
+app.use((req, res) => {
+  res.status(404).type('text').send('Not Found');
+});
 
-    //Routing for API - PENTING: kirim 'db' object ke routes
-    apiRoutes(app, db);
-    
-    // Front-end routes, setelah API
-    app.route('/:project/')
-      .get(function (req, res) {
-        res.sendFile(process.cwd() + '/views/issue.html');
-      });
-        
-    //404 Not Found Middleware
-    app.use(function(req, res, next) {
-      res.status(404)
-        .type('text')
-        .send('Not Found');
-    });
+// Start server setelah konek DB
+client.connect()
+  .then(() => {
+    console.log('MongoDB connected');
 
-    //Start our server and tests!
-    const listener = app.listen(process.env.PORT || 3000, function () {
-      console.log('Your app is listening on port ' + listener.address().port);
-      if(process.env.NODE_ENV === 'test') {
+    const listener = app.listen(process.env.PORT || 3000, () => {
+      console.log('App listening on port ' + listener.address().port);
+
+      // Run test kalau NODE_ENV=test
+      if (process.env.NODE_ENV === 'test') {
         console.log('Running Tests...');
-        setTimeout(function () {
+        setTimeout(() => {
           try {
             runner.run();
-          } catch(e) {
-            var error = e;
-              console.log('Tests are not valid:');
-              console.log(error);
+          } catch (e) {
+            console.log('Tests are not valid:');
+            console.error(e);
           }
-        }, 1500);
+        }, 3500);
       }
     });
-    
-  } catch (e) {
-    console.error("Failed to connect to database:", e);
+  })
+  .catch(err => {
+    console.error('DB connection error:', err);
     process.exit(1);
-  }
-}
+  });
 
-// Panggil fungsi utama untuk memulai segalanya
-startServer();
-
-
-module.exports = app; // for testing
+module.exports = app;
